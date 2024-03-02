@@ -1,0 +1,61 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy to'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - production
+          - stage
+          - test
+          - none
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK 21
+        uses: actions/setup-java@v3
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+      - name: Build with Maven
+        run: mvn -B package --file pom.xml
+  verification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify
+        run: mvn -B verify --file pom.xml
+  dockerize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dockerize and save release tag
+        run: mvn -B dockerize --file pom.xml
+      - name: Push docker image
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          docker login -u $DOCKERHUB_USERNAME -p $DOCKERHUB_TOKEN
+          docker push $DOCKERHUB_USERNAME/loan-calculator
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy latest docker image #deploy to digital ocean using ssh
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          docker login -u $DOCKERHUB_USERNAME -p $DOCKERHUB_TOKEN
+          docker pull $DOCKERHUB_USERNAME/loan-calculator
+          ssh -i $SSH_KEY -p $SSH_PORT $SSH_USER@$SSH_HOST "cd /home/$SSH_USER && docker-compose down && docker-compose pull && docker-compose up -d"
+        
